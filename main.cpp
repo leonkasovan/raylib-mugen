@@ -68,7 +68,7 @@ public:
     Sprite() : Group(0), Number(0), palidx(0), rle(0), coldepth(0) {
         Size[0] = Size[1] = 0;
         Offset[0] = Offset[1] = 0;
-        texture = {0};
+        texture = {};
     }
 
     void CopyFrom(const Sprite& other) {
@@ -102,13 +102,13 @@ class Palette {
 public:
     Texture2D texture;
 
-    Palette() : texture({0}) {}
+    Palette() : texture({}) {}
     explicit Palette(Texture2D id) : texture(id) {}
     explicit Palette(const std::string& actFilename) : texture(GenerateFromACT(actFilename)) {}
 
 private:
     static Texture2D GenerateFromACT(const std::string& filename) {
-        Texture2D texture = {0};
+        Texture2D texture = {};
         std::array<RGB, 256> pal_rgb;
 
         std::ifstream file(filename, std::ios::binary);
@@ -263,10 +263,10 @@ bool SffFile::Load(const std::string& filename) {
             gn[1] = ReadU16LE(file); // number
             gn[2] = ReadU16LE(file); // colnumber
 
-            uint16_t link = ReadU16LE(file);
+            uint16_t link = ReadU16LE(file); (void)link;
             uint32_t ofs = ReadU32LE(file);
-            uint32_t siz = ReadU32LE(file);
-
+            uint32_t siz = ReadU32LE(file); (void) siz;
+ 
             std::array<int, 2> key = { gn[0], gn[1] };
             if (uniquePals.find(key) == uniquePals.end()) {
                 fseek(file, lofs + ofs, SEEK_SET);
@@ -391,12 +391,22 @@ bool SffFile::Load(const std::string& filename) {
 }
 
 void SffFile::Clear() {
+    std::map<unsigned int, bool> unloadedIds;
+
     for (auto& palette : palettes_) {
-        UnloadTexture(palette.texture);
+        if (palette.texture.id != 0 && !unloadedIds[palette.texture.id]) {
+            UnloadTexture(palette.texture);
+            unloadedIds[palette.texture.id] = true;
+        }
     }
+
     for (auto& sprite : sprites_) {
-        UnloadTexture(sprite.texture);
+        if (sprite.texture.id != 0 && !unloadedIds[sprite.texture.id]) {
+            UnloadTexture(sprite.texture);
+            unloadedIds[sprite.texture.id] = true;
+        }
     }
+
     sprites_.clear();
     palettes_.clear();
     palette_usage_.clear();
@@ -754,7 +764,7 @@ bool SffFile::ReadPcxHeader(Sprite& sprite, FILE* file, uint64_t offset) {
         return false;
     }
 
-    uint16_t dummy = ReadU16LE(file);
+    uint16_t dummy = ReadU16LE(file); (void)dummy;
     uint8_t encoding, bpp;
 
     if (fread(&encoding, sizeof(uint8_t), 1, file) != 1) {
@@ -782,7 +792,7 @@ bool SffFile::ReadPcxHeader(Sprite& sprite, FILE* file, uint64_t offset) {
         return false;
     }
 
-    uint16_t bpl = ReadU16LE(file);
+    uint16_t bpl = ReadU16LE(file); (void)bpl;
 
     sprite.Size[0] = rect[2] - rect[0] + 1;
     sprite.Size[1] = rect[3] - rect[1] + 1;
@@ -953,7 +963,7 @@ std::unique_ptr<uint8_t[]> SffFile::Lz5Decode(const Sprite& s, const uint8_t* sr
     }
 
     while (j < dstLen) {
-        int d = static_cast<int>(srcPx[i]);
+        size_t d = static_cast<size_t>(srcPx[i]);
         if (i < srcLen - 1) {
             i++;
         }
@@ -1073,7 +1083,7 @@ std::unique_ptr<uint8_t[]> SffFile::PngDecode(Sprite& s, const uint8_t* data, si
 }
 
 Texture2D SffFile::GeneratePaletteTexture(const std::array<uint32_t, 256>& pal_rgba) {
-    Texture2D texture = {0};
+    Texture2D texture = {};
     std::array<uint8_t, 256 * 4> pal_byte;
 
     // Convert the RGBA values into bytes (0-255 range for each channel)
@@ -1100,7 +1110,7 @@ Texture2D SffFile::GeneratePaletteTexture(const std::array<uint32_t, 256>& pal_r
 }
 
 Texture2D SffFile::GeneratePaletteTexture(const std::array<RGB, 256>& pal_rgb) {
-    Texture2D texture = {0};
+    Texture2D texture = {};
     std::array<uint8_t, 256 * 4> pal_byte;
 
     // Convert the RGB values into bytes (0-255 range for each channel) in reverse order
@@ -1212,37 +1222,45 @@ std::string GetPaletteShaderBody(const std::string& textureFunc, const std::stri
         "}                                  \n";
 }
 
-// Function to get the complete fragment shader based on API
+// Function to get the complete fragment shader based on rlGetVersion()
 std::string GetPaletteFragmentShader() {
+    int glVersion = rlGetVersion();
     std::string version, precision, input, output, textureFunc, outputVar;
 
-#if defined(GRAPHICS_API_OPENGL_21)
-    version = "#version 120";
-    input = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
-    textureFunc = "texture2D";
-    outputVar = "gl_FragColor";
-#elif defined(GRAPHICS_API_OPENGL_33)
-    version = "#version 330";
-    input = "in vec2 fragTexCoord;\nin vec4 fragColor;";
-    output = "out vec4 finalColor;";
-    textureFunc = "texture";
-    outputVar = "finalColor";
-#endif
+    switch (glVersion) {
+        case RL_OPENGL_21: // OpenGL 2.1
+            version = "#version 120";
+            input = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
+            textureFunc = "texture2D";
+            outputVar = "gl_FragColor";
+            break;
 
-#if defined(GRAPHICS_API_OPENGL_ES3)
-    version = "#version 300 es";
-    precision = "precision mediump float;\nprecision mediump sampler2D;";
-    input = "in vec2 fragTexCoord;\nin vec4 fragColor;";
-    output = "out vec4 finalColor;";
-    textureFunc = "texture";
-    outputVar = "finalColor";
-#elif defined(GRAPHICS_API_OPENGL_ES2)
-    version = "#version 100";
-    precision = "precision mediump float;";
-    input = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
-    textureFunc = "texture2D";
-    outputVar = "gl_FragColor";
-#endif
+        case RL_OPENGL_33: // OpenGL 3.3
+            version = "#version 330";
+            input = "in vec2 fragTexCoord;\nin vec4 fragColor;";
+            output = "out vec4 finalColor;";
+            textureFunc = "texture";
+            outputVar = "finalColor";
+            break;
+
+        case RL_OPENGL_ES_30: // OpenGL ES 3.0
+            version = "#version 300 es";
+            precision = "precision mediump float;\nprecision mediump sampler2D;";
+            input = "in vec2 fragTexCoord;\nin vec4 fragColor;";
+            output = "out vec4 finalColor;";
+            textureFunc = "texture";
+            outputVar = "finalColor";
+            break;
+
+        case RL_OPENGL_ES_20: // OpenGL ES 2.0
+        default:
+            version = "#version 100";
+            precision = "precision mediump float;";
+            input = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
+            textureFunc = "texture2D";
+            outputVar = "gl_FragColor";
+            break;
+    }
 
     return version + "\n" +
            precision + (precision.empty() ? "" : "\n") +
@@ -1251,36 +1269,44 @@ std::string GetPaletteFragmentShader() {
            GetPaletteShaderBody(textureFunc, outputVar);
 }
 
-// Function to get the complete vertex shader based on API
+// Function to get the complete vertex shader based on rlGetVersion()
 std::string GetPaletteVertexShader() {
+    int glVersion = rlGetVersion();
     std::string version, precision, attributes, varyings;
 
-#if defined(GRAPHICS_API_OPENGL_21)
-    version = "#version 120";
-    attributes = "attribute vec3 vertexPosition;\nattribute vec2 vertexTexCoord;\nattribute vec4 vertexColor;";
-    varyings = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
-#elif defined(GRAPHICS_API_OPENGL_33)
-    version = "#version 330";
-    attributes = "in vec3 vertexPosition;\nin vec2 vertexTexCoord;\nin vec4 vertexColor;";
-    varyings = "out vec2 fragTexCoord;\nout vec4 fragColor;";
-#endif
+    switch (glVersion) {
+        case RL_OPENGL_21:
+            version = "#version 120";
+            attributes = "attribute vec3 vertexPosition;\nattribute vec2 vertexTexCoord;\nattribute vec4 vertexColor;";
+            varyings = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
+            break;
 
-#if defined(GRAPHICS_API_OPENGL_ES3)
-    version = "#version 300 es";
-    precision = "precision mediump float;";
-    attributes = "in vec3 vertexPosition;\nin vec2 vertexTexCoord;\nin vec4 vertexColor;";
-    varyings = "out vec2 fragTexCoord;\nout vec4 fragColor;";
-#elif defined(GRAPHICS_API_OPENGL_ES2)
-    version = "#version 100";
-    precision = "precision mediump float;";
-    attributes = "attribute vec3 vertexPosition;\nattribute vec2 vertexTexCoord;\nattribute vec4 vertexColor;";
-    varyings = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
-#endif
+        case RL_OPENGL_33:
+            version = "#version 330";
+            attributes = "in vec3 vertexPosition;\nin vec2 vertexTexCoord;\nin vec4 vertexColor;";
+            varyings = "out vec2 fragTexCoord;\nout vec4 fragColor;";
+            break;
+
+        case RL_OPENGL_ES_30:
+            version = "#version 300 es";
+            precision = "precision mediump float;";
+            attributes = "in vec3 vertexPosition;\nin vec2 vertexTexCoord;\nin vec4 vertexColor;";
+            varyings = "out vec2 fragTexCoord;\nout vec4 fragColor;";
+            break;
+
+        case RL_OPENGL_ES_20:
+        default:
+            version = "#version 100";
+            precision = "precision mediump float;";
+            attributes = "attribute vec3 vertexPosition;\nattribute vec2 vertexTexCoord;\nattribute vec4 vertexColor;";
+            varyings = "varying vec2 fragTexCoord;\nvarying vec4 fragColor;";
+            break;
+    }
 
     return version + "\n" +
            precision + (precision.empty() ? "" : "\n") +
            attributes + "\n" +
-           varyings + "\n" +
+           varyings + "\n"
            "uniform mat4 mvp;\n"
            "void main()\n"
            "{\n"
@@ -1362,6 +1388,7 @@ int main(int argc, char *argv[]) {
     }
 
     UnloadShader(shader);
+    sff.Clear();
     CloseWindow();
 
     return 0;
