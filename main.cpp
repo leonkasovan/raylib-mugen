@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <unordered_map>
 #include <vector>
 #include <array>
 #include <string>
@@ -32,6 +33,12 @@
 // #else
 //     #include <dlfcn.h>
 // #endif
+
+struct ArrayHash {
+    std::size_t operator()(const std::array<int, 2>& arr) const {
+        return std::hash<int>()(arr[0]) ^ (std::hash<int>()(arr[1]) << 1);
+    }
+};
 
 class RGB {
 public:
@@ -251,7 +258,8 @@ bool SffFile::Load(const std::string& filename) {
 
     // Load palettes for SFF v2
     if (header_.Ver0 != 1) {
-        std::map<std::array<int, 2>, int> uniquePals;
+        // std::map<std::array<int, 2>, int> uniquePals;
+		std::unordered_map<std::array<int, 2>, int, ArrayHash> uniquePals;
         palettes_.clear();
         palettes_.reserve(header_.NumberOfPalettes);
 
@@ -267,7 +275,7 @@ bool SffFile::Load(const std::string& filename) {
             uint32_t ofs = ReadU32LE(file);
             uint32_t siz = ReadU32LE(file); (void) siz;
  
-            std::array<int, 2> key = { gn[0], gn[1] };
+            /*std::array<int, 2> key = { gn[0], gn[1] };
             if (uniquePals.find(key) == uniquePals.end()) {
                 fseek(file, lofs + ofs, SEEK_SET);
                 std::array<uint32_t, 256> rgba;
@@ -282,7 +290,27 @@ bool SffFile::Load(const std::string& filename) {
                 printf("Palette %d(%d,%d) is not unique, using palette %d\n",
                        i, gn[0], gn[1], uniquePals[key]);
                 palettes_.emplace_back(palettes_[uniquePals[key]].texture);
-            }
+            }*/
+
+			// Optimized using unordered_map (faster)
+			std::array<int, 2> key = { gn[0], gn[1] };
+			auto it = uniquePals.find(key);
+			if (it == uniquePals.end()) {
+				fseek(file, lofs + ofs, SEEK_SET);
+				std::array<uint32_t, 256> rgba;
+				if (fread(rgba.data(), sizeof(uint32_t), 256, file) != 256) {
+					printf("Failed to read palette data: %s\n", filename.c_str());
+					fclose(file);
+					return false;
+				}
+				palettes_.emplace_back(GeneratePaletteTexture(rgba));
+				uniquePals[key] = static_cast<int>(palettes_.size() - 1);
+			} else {
+				printf("Palette %d(%d,%d) is not unique, using palette %d\n",
+					   i, gn[0], gn[1], it->second);
+				palettes_.emplace_back(palettes_[it->second].texture);
+			}
+
         }
     }
 
@@ -362,6 +390,11 @@ bool SffFile::Load(const std::string& filename) {
             sprites_[i].texture.height = sprites_[i].Size[1];
             sprites_[i].texture.mipmaps = 1;
             sprites_[i].texture.format = format;
+			
+			if (sprites_[i].IsPaletted()) {
+				// No filtering — perfect for pixel art. Keeps hard edges and crisp pixels.
+				SetTextureFilter(sprites_[i].texture, TEXTURE_FILTER_POINT);
+			}
 
             // Update previous sprite reference
             if (sprites_[i].Group == 9000) {

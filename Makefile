@@ -3,11 +3,11 @@
 # ==============================================
 ifeq ($(OS),Windows_NT)
 	EXE_EXT = .exe
-	PLATFORM = windows
+	PLAT = windows
 	RM = del /Q
 else
 	EXE_EXT =
-	PLATFORM = linux
+	PLAT = linux
 	RM = rm -f
 endif
 
@@ -22,7 +22,8 @@ OBJ = $(SRC:.cpp=.o)
 # Common settings
 # ==============================================
 INCLUDES = -I../raylib/src
-LINUX_LIBS = -L../raylib/src -lraylib -lEGL -ldrm -lgbm -lGLESv2
+#LINUX_LIBS = -L../raylib/src -lraylib -lEGL -ldrm -lgbm -lGLESv2
+LINUX_LIBS = -L../raylib/src -lraylib -lSDL2
 WIN_LIBS   = -lraylib -lgdi32 -lwinmm
 
 # ==============================================
@@ -54,8 +55,8 @@ release: build
 
 # --- Build rule ---
 build: $(OBJ)
-	@echo "Building $(TARGET) for $(PLATFORM)"
-ifeq ($(PLATFORM),linux)
+	@echo "Building $(TARGET) for $(PLAT)"
+ifeq ($(PLAT),linux)
 	$(CXX) $(OBJ) -o $(TARGET) $(INCLUDES) $(LINUX_LIBS) $(LDFLAGS)
 else
 	$(CXX) $(OBJ) -o $(TARGET) $(INCLUDES) $(WIN_LIBS) $(LDFLAGS)
